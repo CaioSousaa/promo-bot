@@ -44,7 +44,7 @@ Mensagem com **foto + legenda**:
 | Destino | Grupo pessoal do usuário, com o bot adicionado | Escolha do usuário. |
 | Keywords | Apenas `teclado` e `headset`, hardcoded | Escolha do usuário. Sem variações, sem lista de exclusão. |
 | Formato do alerta | Mensagem original (foto + texto) + nome do grupo de origem | Escolha do usuário. |
-| Duplicatas entre grupos | **Enviar todas** (sem deduplicação) | Escolha do usuário. Mesma promo pode chegar até 3x. |
+| Duplicatas | **Deduplicar por nome + preço + cupom, janela de 24h** (revisado em 11/09/2026) | Inicialmente "enviar todas", mas a mesma promo chegava 3x. O link fica de fora da comparação: cada canal usa o próprio link de afiliado (e o mesmo canal reposta com outro link encurtado), então ele nunca se repete. Estado guardado em `state.json["sent"]`, sem banco. |
 | Linguagem | Python + Telethon | Lib de userbot mais madura; script pequeno. |
 | Hospedagem | **GitHub Actions com cron, repositório público** | Usuário quer custo zero, sem cartão de crédito e sem se preocupar com código público. Repo público = minutos de Actions ilimitados. |
 | Modelo de execução | **Polling** (a cada ~5 min), não listener | Actions não mantém processo vivo; cada execução busca as mensagens novas desde a última lida e termina. |

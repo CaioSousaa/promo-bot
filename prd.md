@@ -22,7 +22,6 @@ Script executado periodicamente pelo GitHub Actions que verifica 3 grupos/canais
 - Tempo real / processo 24h.
 - API HTTP, interface web, painel.
 - Banco de dados.
-- Deduplicação entre grupos.
 - Filtro por preço, marca ou lista de exclusão.
 - Email ou outros canais.
 - Mensagens editadas (só mensagens novas).
@@ -42,7 +41,7 @@ Script executado periodicamente pelo GitHub Actions que verifica 3 grupos/canais
 | RF7 | Cabeçalho: `📢 <nome da fonte>` + link para a mensagem original (`https://t.me/c/<id sem -100>/<msg_id>`). |
 | RF8 | Preservar links/formatação do texto original (converter entidades para HTML e enviar com `parse_mode=HTML`). Se a Bot API rejeitar o HTML, reenviar como texto puro. |
 | RF9 | Legenda acima de 1024 caracteres: enviar foto sem legenda e depois o texto em mensagem separada. |
-| RF10 | Enviar todas as ocorrências, sem deduplicação entre fontes. |
+| RF10 | Não reenviar promo já enviada nas últimas 24h. Promo = nome (linha que contém a keyword, normalizada: minúsculas, sem acento/emoji/pontuação) + preço (só o número) + cupom (maiúsculas; vazio se não houver). O link **não** entra: cada canal usa link de afiliado próprio. Fingerprints ficam em `state.json["sent"]` com timestamp e são descartados após 24h. |
 | RF11 | Mensagens sem texto/legenda são ignoradas (mas o ID avança). |
 | RF12 | Atualizar o último ID da fonte **após cada mensagem processada**. Falha temporária no envio (rede, 5xx, 403, rate limit): parar aquela fonte sem avançar o ID (será tentada de novo na próxima execução). Rejeição permanente da Bot API (HTTP 400, exceto erro de parse HTML que tem fallback): logar, descartar a mensagem e avançar, para não travar a fonte. Em qualquer falha, a execução termina com código ≠ 0. |
 
@@ -349,4 +348,5 @@ Evita que o GitHub desative os workflows agendados após 60 dias sem atividade n
 | GitHub restringe uso de Actions para automação não-CI | Para de rodar | Uso leve; plano de migração para Oracle/PC local. |
 | Fonte muda formato / foto sem legenda | Perde matches | Aceito; revisar se parar de chegar alerta. |
 | Falsos positivos | Ruído | Aceito pelo usuário. |
-| Mesma promo em 3 fontes | Até 3 alertas iguais | Aceito (decisão: sem dedup). |
+| Mesma promo com texto diferente entre fontes (nome abreviado, preço em outro formato) | Alerta repetido escapa da dedup | Normalização de nome/preço/cupom; ajustar regex se aparecer formato novo. |
+| Promo diferente com mesmo nome + preço + cupom em 24h | Alerta legítimo não enviado | Aceito: na prática é a mesma oferta. |

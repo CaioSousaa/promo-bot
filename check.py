@@ -4,11 +4,14 @@ Roda uma vez e termina (feito para cron no GitHub Actions). O último ID lido
 de cada fonte fica em state.json, para a próxima execução continuar dali.
 """
 import asyncio
+import hashlib
 import json
 import logging
 import os
+import re
 import sys
 import time
+import unicodedata
 from datetime import datetime, timedelta, timezone
 from html import escape
 
@@ -23,6 +26,7 @@ FIRST_RUN_LOOKBACK = timedelta(minutes=30)
 MAX_MESSAGES_PER_RUN = 200
 STATE_FILE = "state.json"
 CAPTION_LIMIT = 1024
+DEDUP_WINDOW = timedelta(hours=24)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logging.getLogger("telethon").setLevel(logging.WARNING)
@@ -65,6 +69,44 @@ def save_state(state):
 def utf16_len(text):
     # Limites do Telegram são contados em unidades UTF-16 (emoji conta 2).
     return len(text.encode("utf-16-le")) // 2
+
+
+def normalize(text):
+    # Minúsculas, sem acento, emoji ou pontuação: "💥 😱 Headset Gamer, Preto 🔥" -> "headset gamer preto".
+    text = unicodedata.normalize("NFKD", text.lower())
+    text = "".join(c for c in text if not unicodedata.combining(c))
+    return re.sub(r"[^a-z0-9]+", " ", text).strip()
+
+
+def parse_price(text):
+    # Formatos vistos nas fontes: "R$ 217", "R$ 93 REAIS", "POR: 93 REAIS".
+    match = re.search(r"(?:r\$|\bpor\b:?)[ \t]*(\d[\d.,]*)", text, re.IGNORECASE) or re.search(
+        r"(\d[\d.,]*)[ \t]*reais", text, re.IGNORECASE
+    )
+    if not match:
+        return ""
+    number = match.group(1).rstrip(".,").replace(".", "").replace(",", ".")
+    try:
+        return f"{float(number):.2f}"
+    except ValueError:
+        return number
+
+
+def parse_coupon(text):
+    match = re.search(r"\bcupom\b[ \t]*:[ \t]*([A-Za-z0-9_-]+)", text, re.IGNORECASE)
+    return match.group(1).upper() if match else ""
+
+
+def promo_fingerprint(text):
+    """Identifica a promo por nome + preço + cupom.
+
+    O link fica de fora: cada canal usa o próprio link de afiliado, então ele nunca se repete.
+    O nome é a linha que contém a keyword (algumas fontes põem uma chamada antes do produto).
+    """
+    lines = [line for line in text.splitlines() if any(k in line.lower() for k in KEYWORDS)]
+    name = normalize(lines[0] if lines else text)
+    key = f"{name}|{parse_price(text)}|{parse_coupon(text)}"
+    return hashlib.sha1(key.encode()).hexdigest()[:16]
 
 
 def bot_call(method, data, files=None):
@@ -136,26 +178,31 @@ async def process_source(client, source, state):
         kwargs = {"offset_date": datetime.now(timezone.utc) - FIRST_RUN_LOOKBACK}
 
     ok = True
-    read = sent = 0
+    read = sent = repeated = 0
     try:
         # reverse=True: da mais antiga para a mais nova, só mensagens depois de offset_id/offset_date.
         async for msg in client.iter_messages(entity, reverse=True, limit=MAX_MESSAGES_PER_RUN, **kwargs):
             read += 1
             text = msg.message or ""
             if any(keyword in text.lower() for keyword in KEYWORDS):
-                try:
-                    await forward_message(entity, msg)
-                    sent += 1
-                except BadRequest as e:
-                    log.error("%s msg %s descartada: %s", entity.title, msg.id, e)
-                    ok = False
+                fingerprint = promo_fingerprint(text)
+                if fingerprint in state["sent"]:
+                    repeated += 1
+                else:
+                    try:
+                        await forward_message(entity, msg)
+                        sent += 1
+                        state["sent"][fingerprint] = int(time.time())
+                    except BadRequest as e:
+                        log.error("%s msg %s descartada: %s", entity.title, msg.id, e)
+                        ok = False
             state[key] = msg.id
             save_state(state)
     except SendError as e:
         log.error("%s: envio falhou, tenta de novo na próxima execução: %s", entity.title, e)
         ok = False
 
-    log.info("%s: %d lidas, %d enviadas", entity.title, read, sent)
+    log.info("%s: %d lidas, %d enviadas, %d repetidas", entity.title, read, sent, repeated)
     return ok
 
 
@@ -167,6 +214,9 @@ async def main():
         os.environ["TG_API_HASH"],
     )
     state = load_state()
+    # Promos já enviadas ficam em state["sent"] (fingerprint -> timestamp); esquece as mais velhas que DEDUP_WINDOW.
+    cutoff = time.time() - DEDUP_WINDOW.total_seconds()
+    state["sent"] = {fp: ts for fp, ts in state.get("sent", {}).items() if ts >= cutoff}
     ok = True
     async with client:
         # StringSession não guarda cache de entidades; get_dialogs permite resolver os IDs das fontes.
