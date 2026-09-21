@@ -21,7 +21,7 @@ from telethon.extensions import html
 from telethon.sessions import StringSession
 
 SOURCES = [-1001444838674, -1001283210985, -1001968825483]
-KEYWORDS = ("aula f75",)
+KEYWORDS = ("aula f75", "barra de luz")
 FIRST_RUN_LOOKBACK = timedelta(minutes=30)
 MAX_MESSAGES_PER_RUN = 200
 STATE_FILE = "state.json"
